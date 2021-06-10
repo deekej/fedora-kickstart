@@ -1,0 +1,85 @@
+#!/bin/bash
+
+# NOTE: Fill-in the variables below and run execut the script. Do not commit any
+#       changes with these variables filled, especially the plain-text passwords!
+
+export HOSTNAME=""
+export NETWORK_DEV=""                         # NOTE: Use only ethernet device!
+export DRIVE=""
+
+export INSTALL_SSH_PASSWD_PLAINTXT="setup"
+
+export ROOT_PASSWD_PLAINTXT=""
+export USER_PASSWD_PLAINTXT=""
+
+export USERNAME=""
+export FULL_NAME=""
+export USER_UID=""
+export USER_GID=""
+
+# =============================================================================
+
+export PROG_NAME="$(basename "${0}")"
+
+echo "${PROG_NAME}: ---------- GRUB2 Password ----------"
+
+grub2-mkpasswd-pbkdf2 --iteration-count=10000 --salt=16 | tee .passwd.tmp
+
+if grep -i -e 'error' .passwd.tmp; then
+  rm -f .passwd.tmp
+  exit 1
+else
+  export GRUB2_PASSWD_HASH="$(grep -o -e "grub\.pbkdf2\..*$" .passwd.tmp)"
+fi
+
+# -----------------------------------------------------------------------------
+
+echo ""
+echo "${PROG_NAME}: ---------- LUKS2 Password ----------"
+
+read -s -r -p "Enter password: "    LUKS2_PASSWD_1 && echo ""
+read -s -r -p "Reenter password: "  LUKS2_PASSWD_2 && echo ""
+
+if [[ "${LUKS2_PASSWD_1}" != "${LUKS2_PASSWD_2}" ]]; then
+  echo "${PROG_NAME}: The LUKS2 passwords do not match!" >&2
+  rm -f .passwd.tmp
+  exit 1
+else
+  export LUKS2_PASSWD_PLAINTXT="${LUKS2_PASSWD_1}"
+fi
+
+echo ""
+
+# -----------------------------------------------------------------------------
+
+RANDOM_SALT_1="$(pwgen --capitalize --numerals --ambiguous --remove-chars='.:\/' --secure 16 1)"
+RANDOM_SALT_2="$(pwgen --capitalize --numerals --ambiguous --remove-chars='.:\/' --secure 16 1)"
+RANDOM_SALT_3="$(pwgen --capitalize --numerals --ambiguous --remove-chars='.:\/' --secure 16 1)"
+
+export ROOT_PASSWD_HASH="$(python -c "import crypt; print(crypt.crypt(\"${ROOT_PASSWD_PLAINTXT}\", \"\$6\$${RANDOM_SALT_1}\"))" | sed -e 's/\$/\\$/g' | sed -e 's/\//\\\//g')"
+export USER_PASSWD_HASH="$(python -c "import crypt; print(crypt.crypt(\"${USER_PASSWD_PLAINTXT}\", \"\$6\$${RANDOM_SALT_2}\"))" | sed -e 's/\$/\\$/g' | sed -e 's/\//\\\//g')"
+
+export INSTALL_SSH_PASSWD_HASH="$(python -c "import crypt; print(crypt.crypt(\"${INSTALL_SSH_PASSWD_PLAINTXT}\", \"\$6\$${RANDOM_SALT_3}\"))" | sed -e 's/\$/\\$/g' | sed -e 's/\//\\\//g')"
+
+# -----------------------------------------------------------------------------
+
+sed -e "s/\${HOSTNAME}/${HOSTNAME}/" \
+    -e "s/\${NETWORK_DEV}/${NETWORK_DEV}/" \
+    -e "s/\${DRIVE}/${DRIVE}/" \
+    -e "s/\${USERNAME}/${USERNAME}/" \
+    -e "s/\${FULL_NAME}/${FULL_NAME}/" \
+    -e "s/\${USER_UID}/${USER_UID}/" \
+    -e "s/\${USER_GID}/${USER_GID}/" \
+    -e "s/\${GRUB2_PASSWD_HASH}/${GRUB2_PASSWD_HASH}/" \
+    -e "s/\${LUKS2_PASSWD_PLAINTXT}/${LUKS2_PASSWD_PLAINTXT}/" \
+    -e "s/\${ROOT_PASSWD_HASH}/${ROOT_PASSWD_HASH}/" \
+    -e "s/\${USER_PASSWD_HASH}/${USER_PASSWD_HASH}/" \
+    -e "s/\${INSTALL_SSH_PASSWD_HASH}/${INSTALL_SSH_PASSWD_HASH}/" \
+    .kickstart.tpl > fedora-kickstart.ks
+
+# -----------------------------------------------------------------------------
+
+rm -f .passwd.tmp
+
+echo "${PROG_NAME}: -----------------------------------------------------"
+echo "${PROG_NAME}: Kickstart file has been created: fedora-kickstart.cfg"
